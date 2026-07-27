@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      force_republish:
+        description: 'Overwrite an existing release for this version (breaks published hashes — use only to repair)'
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [ main ]
     paths-ignore: [ '**.md', 'docs/**' ]
@@ -324,8 +329,43 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Decide whether to publish
+        id: relgate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A published release is immutable.  Re-running a build for a version
+          # that already exists (e.g. the weekly cron when upstream has not moved)
+          # produces a byte-different but equivalent binary — MSVC and NSIS embed
+          # timestamps.  Overwriting the assets would change their SHA-256 and
+          # break every reference that pinned the old hash: the winget and
+          # Chocolatey manifests, and any SHA256SUMS a user already saved.  So we
+          # publish only when the tag does not yet exist.
+          want=false
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.publish_release }}" = "true" ]; then
+            want=true
+          fi
+          exists=false
+          if gh release view "win-${GLABELS_VERSION}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            exists=true
+          fi
+          publish=false
+          if [ "$want" = "true" ]; then
+            if [ "$exists" = "false" ]; then
+              publish=true
+            elif [ "${{ github.event.inputs.force_republish }}" = "true" ]; then
+              publish=true
+              echo "::warning::Overwriting existing release win-${GLABELS_VERSION}; hashes will change."
+            else
+              echo "::notice::Release win-${GLABELS_VERSION} already exists and force_republish is off — skipping publish so existing hashes stay valid."
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
       - name: Publish release
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.publish_release == 'true' }}
+        if: ${{ steps.relgate.outputs.publish == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: win-${{ env.GLABELS_VERSION }}

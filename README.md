@@ -92,6 +92,12 @@ What you get here are snapshots of the `master` branch, rebuilt weekly and whene
 upstream changes are picked up. They are usable, but treat them as pre-release software
 and keep backups of your projects.
 
+A published release is immutable: the weekly rebuild only publishes when upstream has
+actually moved (a new commit count means a new version and a new tag). It never overwrites
+the assets of a version that already exists, because a rebuild of the same commit is
+byte-different — MSVC and NSIS embed timestamps — and overwriting would change the SHA-256
+that the winget and Chocolatey manifests pin.
+
 ## Building it yourself
 
 Fork this repository and use **Actions → Build gLabels for Windows → Run workflow**. You
