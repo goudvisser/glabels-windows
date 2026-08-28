@@ -1,0 +1,12 @@
+diff --git a/glabels/ui/PrintView.ui b/glabels/ui/PrintView.ui
+--- a/glabels/ui/PrintView.ui
++++ b/glabels/ui/PrintView.ui
+@@ -133,7 +133,7 @@
+             <property name="minimum">
+              <number>1</number>
+             </property>
+             <property name="maximum">
+-             <number>250</number>
++             <number>9999</number>
+             </property>
+            </widget>
