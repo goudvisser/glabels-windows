@@ -1,0 +1,168 @@
+diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
+--- a/glabels/PrintView.cpp
++++ b/glabels/PrintView.cpp
+@@ -27,6 +27,88 @@
+ #include <QPrinter>
+ #include <QPrinterInfo>
+ #include <QPrintDialog>
+ 
++#ifdef Q_OS_WIN
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <commctrl.h>
++
++namespace
++{
++        HWND gCopiesEdit = nullptr;
++        HWND gCopiesSpinner = nullptr;
++        WNDPROC gOldCopiesEditProc = nullptr;
++
++        BOOL CALLBACK findCopiesControls( HWND hwnd, LPARAM )
++        {
++                if ( GetDlgCtrlID(hwnd) == 0x481 )
++                {
++                        gCopiesEdit = hwnd;
++                }
++
++                wchar_t className[64] = {};
++                GetClassNameW( hwnd, className, 64 );
++
++                if ( wcscmp(className, L"msctls_updown32") == 0 )
++                {
++                        HWND buddy = reinterpret_cast<HWND>(
++                                SendMessageW( hwnd, UDM_GETBUDDY, 0, 0 ) );
++
++                        if ( buddy && GetDlgCtrlID(buddy) == 0x481 )
++                        {
++                                gCopiesEdit = buddy;
++                                gCopiesSpinner = hwnd;
++                        }
++                }
++
++                return TRUE;
++        }
++
++        LRESULT CALLBACK copiesEditProc( HWND hwnd,
++                                         UINT msg,
++                                         WPARAM wParam,
++                                         LPARAM lParam )
++        {
++                if ( msg == WM_CHAR &&
++                     wParam >= L'0' &&
++                     wParam <= L'9' &&
++                     gCopiesSpinner )
++                {
++                        wchar_t text[16] = {};
++                        GetWindowTextW( hwnd, text, 16 );
++
++                        DWORD start = 0;
++                        DWORD end = 0;
++                        SendMessageW( hwnd, EM_GETSEL,
++                                      reinterpret_cast<WPARAM>(&start),
++                                      reinterpret_cast<LPARAM>(&end) );
++
++                        const int length = lstrlenW( text );
++
++                        /*
++                         * The native Windows print dialog accepts only
++                         * three typed digits here, even when the printer
++                         * reports a much larger copy limit.  If three
++                         * digits already exist and the caret is at the
++                         * end, handle the fourth digit ourselves.
++                         */
++                        if ( length == 3 &&
++                             start == 3 &&
++                             end == 3 )
++                        {
++                                int value =
++                                        (text[0] - L'0') * 1000 +
++                                        (text[1] - L'0') * 100 +
++                                        (text[2] - L'0') * 10 +
++                                        (wParam - L'0');
++
++                                if ( value >= 1 && value <= 9999 )
++                                {
++                                        SendMessageW( gCopiesSpinner,
++                                                      UDM_SETPOS32,
++                                                      0,
++                                                      value );
++                                        return 0;
++                                }
++                        }
++                }
++
++                if ( msg == WM_NCDESTROY )
++                {
++                        auto oldProc = gOldCopiesEditProc;
++                        gCopiesEdit = nullptr;
++                        gCopiesSpinner = nullptr;
++                        gOldCopiesEditProc = nullptr;
++                        return CallWindowProcW( oldProc, hwnd, msg, wParam, lParam );
++                }
++
++                return CallWindowProcW(
++                        gOldCopiesEditProc, hwnd, msg, wParam, lParam );
++        }
++
++        LRESULT CALLBACK copiesDialogHook( int code,
++                                           WPARAM wParam,
++                                           LPARAM lParam )
++        {
++                if ( code == HCBT_ACTIVATE && !gOldCopiesEditProc )
++                {
++                        gCopiesEdit = nullptr;
++                        gCopiesSpinner = nullptr;
++
++                        EnumChildWindows(
++                                reinterpret_cast<HWND>(wParam),
++                                findCopiesControls,
++                                0 );
++
++                        if ( gCopiesEdit && gCopiesSpinner )
++                        {
++                                gOldCopiesEditProc =
++                                        reinterpret_cast<WNDPROC>(
++                                                SetWindowLongPtrW(
++                                                        gCopiesEdit,
++                                                        GWLP_WNDPROC,
++                                                        reinterpret_cast<LONG_PTR>(
++                                                                copiesEditProc ) ) );
++                        }
++                }
++
++                return CallNextHookEx( nullptr, code, wParam, lParam );
++        }
++}
++#endif
++
+ 
+ namespace glabels
+ {
+@@ -250,7 +332,22 @@
+                 printDialog.setOption( QAbstractPrintDialog::PrintShowPageSize,  true );
+                 printDialog.setOption( QAbstractPrintDialog::PrintCollateCopies, false );
+                 printDialog.setOption( QAbstractPrintDialog::PrintCurrentPage,   false );
+-                if ( printDialog.exec() == QDialog::Accepted )
++
++#ifdef Q_OS_WIN
++                HHOOK copiesHook =
++                        SetWindowsHookExW( WH_CBT,
++                                          copiesDialogHook,
++                                          nullptr,
++                                          GetCurrentThreadId() );
++#endif
++
++                int dialogResult = printDialog.exec();
++
++#ifdef Q_OS_WIN
++                if ( copiesHook )
++                {
++                        UnhookWindowsHookEx( copiesHook );
++                }
++#endif
++
++                if ( dialogResult == QDialog::Accepted )
+                 {
+                         mRenderer.print( &printer );
