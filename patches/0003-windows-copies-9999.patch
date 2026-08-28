@@ -1,8 +1,7 @@
 diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
 --- a/glabels/PrintView.cpp
 +++ b/glabels/PrintView.cpp
-@@ -27,6 +27,128 @@
- #include <QPrinter>
+@@ -27,6 +27,146 @@
  #include <QPrinterInfo>
  #include <QPrintDialog>
  
@@ -12,9 +11,11 @@ diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
 +#endif
 +#include <windows.h>
 +#include <commctrl.h>
++#endif
 +
 +namespace
 +{
++#ifdef Q_OS_WIN
 +        HWND gCopiesEdit = nullptr;
 +        HWND gCopiesSpinner = nullptr;
 +        WNDPROC gOldCopiesEditProc = nullptr;
@@ -59,15 +60,14 @@ diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
 +
 +                        DWORD start = 0;
 +                        DWORD end = 0;
-+                        SendMessageW( hwnd, EM_GETSEL,
++                        SendMessageW( hwnd,
++                                      EM_GETSEL,
 +                                      reinterpret_cast<WPARAM>(&start),
 +                                      reinterpret_cast<LPARAM>(&end) );
 +
 +                        const int length = lstrlenW( text );
 +
-+                        if ( length == 3 &&
-+                             start == 3 &&
-+                             end == 3 )
++                        if ( length == 3 && start == 3 && end == 3 )
 +                        {
 +                                const int value =
 +                                        (text[0] - L'0') * 1000 +
@@ -75,7 +75,7 @@ diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
 +                                        (text[2] - L'0') * 10 +
 +                                        (wParam - L'0');
 +
-+                                if ( value >= 1 && value <= 9999 )
++                                if ( value >= 1000 && value <= 9999 )
 +                                {
 +                                        SendMessageW( gCopiesSpinner,
 +                                                      UDM_SETPOS32,
@@ -118,46 +118,38 @@ diff --git a/glabels/PrintView.cpp b/glabels/PrintView.cpp
 +
 +                return CallNextHookEx( nullptr, code, wParam, lParam );
 +        }
-+
-+        void resetCopiesHook()
-+        {
-+                gCopiesEdit = nullptr;
-+                gCopiesSpinner = nullptr;
-+                gOldCopiesEditProc = nullptr;
-+        }
-+}
 +#endif
 +
- 
- namespace glabels
-@@ -246,10 +368,29 @@
-                 QPrintDialog printDialog( &printer, this );
-                 printDialog.setOption( QAbstractPrintDialog::PrintToFile,        true );
-                 printDialog.setOption( QAbstractPrintDialog::PrintSelection,     false );
-                 printDialog.setOption( QAbstractPrintDialog::PrintPageRange,     false );
-                 printDialog.setOption( QAbstractPrintDialog::PrintShowPageSize,  true );
-                 printDialog.setOption( QAbstractPrintDialog::PrintCollateCopies, false );
-                 printDialog.setOption( QAbstractPrintDialog::PrintCurrentPage,   false );
--                if ( printDialog.exec() == QDialog::Accepted )
-+
++        int execPrintDialogWithCopiesFix( QPrintDialog& printDialog )
++        {
 +#ifdef Q_OS_WIN
 +                HHOOK copiesHook =
 +                        SetWindowsHookExW( WH_CBT,
 +                                          copiesDialogHook,
 +                                          nullptr,
 +                                          GetCurrentThreadId() );
-+#endif
 +
-+                const int dialogResult = printDialog.exec();
++                const int result = printDialog.exec();
 +
-+#ifdef Q_OS_WIN
 +                if ( copiesHook )
 +                {
 +                        UnhookWindowsHookEx( copiesHook );
 +                }
-+                resetCopiesHook();
-+#endif
 +
-+                if ( dialogResult == QDialog::Accepted )
++                gCopiesEdit = nullptr;
++                gCopiesSpinner = nullptr;
++                gOldCopiesEditProc = nullptr;
++                return result;
++#else
++                return printDialog.exec();
++#endif
++        }
++}
+ 
+ namespace glabels
+ {
+@@ -252,3 +392,3 @@
+                 printDialog.setOption( QAbstractPrintDialog::PrintCurrentPage,   false );
+-                if ( printDialog.exec() == QDialog::Accepted )
++                if ( execPrintDialogWithCopiesFix(printDialog) == QDialog::Accepted )
                  {
-                         mRenderer.print( &printer );
